@@ -159,6 +159,7 @@ body{display:flex;flex-direction:column;overflow:hidden}
 .hday-pl{display:flex;align-items:center;gap:4px;background:var(--sur2);border-radius:6px;padding:3px 7px}
 .hday-plpts{font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:14px}
 .status{text-align:center;padding:20px;color:var(--mut);font-size:13px}
+.dup-warn{display:none;background:#FFF3E0;border:1.5px solid var(--m);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px;font-weight:600;color:#E65100}
 .success-toast{position:fixed;top:calc(env(safe-area-inset-top,0) + 60px);left:50%;transform:translateX(-50%);background:#2E7D32;color:#fff;padding:10px 20px;border-radius:100px;font-weight:700;font-size:13px;z-index:200;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
 .success-toast.show{opacity:1}
 @media(min-width:640px){
@@ -220,6 +221,7 @@ body{display:flex;flex-direction:column;overflow:hidden}
       <div class="lform">
         <input type="date" class="ldate" id="ldate">
         <div class="lmeta" id="lmeta">Selecione uma data</div>
+        <div class="dup-warn" id="dup-warn">⚠️ Este dia já foi registrado. Selecione outra data.</div>
         <div style="overflow-x:auto">
           <table class="cgrid" id="cgrid">
             <thead><tr>
@@ -716,21 +718,53 @@ function checkFormReady() {
 
 function onDateChange() {
   const v = $('ldate').value;
-  if (!v) { $('lmeta').textContent = 'Selecione uma data'; checkFormReady(); return; }
+  const dupEl = $('dup-warn');
+  if (!v) {
+    $('lmeta').textContent = 'Selecione uma data';
+    dupEl.style.display = 'none';
+    checkFormReady();
+    return;
+  }
   const info = getMesInfo(v);
   $('lmeta').textContent = `${info.mes} · Semana ${info.semana} · ${info.diaSemana}${!info.isWeekday?' ⚠️ Fim de semana':''}`;
+  const isDup = recordedDates.has(v);
+  dupEl.style.display = isDup ? 'block' : 'none';
+  if (isDup) { $('sbtn').disabled = true; return; }
   checkFormReady();
 }
 
 let DB = null;
+// cache of recorded date strings (YYYY-MM-DD) for fast duplicate check
+let recordedDates = new Set();
 
 async function initDb() {
   try {
     DB = await window.claude?.use('db');
     if (!DB) { renderHistoryFallback(); return; }
+    // Immediate load so history appears right away
+    await loadHistory();
+    // Then subscribe for real-time updates
     DB.collection('dias').orderBy('data','desc').limit(30)
-      .onSnapshot(snap => renderHistory(snap.docs), () => renderHistoryFallback());
+      .onSnapshot(snap => { renderHistory(snap.docs); syncDateSet(snap.docs); },
+                  () => {});
   } catch(e) { renderHistoryFallback(); }
+}
+
+async function loadHistory() {
+  if (!DB) return;
+  try {
+    const snap = await DB.collection('dias').orderBy('data','desc').limit(30).get();
+    renderHistory(snap.docs);
+    syncDateSet(snap.docs);
+  } catch(e) { renderHistoryFallback(); }
+}
+
+function syncDateSet(docs) {
+  recordedDates = new Set(
+    (docs||[]).filter(d=>d.exists).map(d=>d.data().data)
+  );
+  // Re-validate current date selection
+  onDateChange();
 }
 
 async function saveDay() {
@@ -755,6 +789,7 @@ async function saveDay() {
   });
   try {
     await DB.collection('dias').doc(dateStr).set(docData);
+    recordedDates.add(dateStr);
     showToast('✓ Dia salvo!');
     PL.forEach(p=>{ formState[p.name]=['','','','','']; });
     document.querySelectorAll('.csel').forEach(s=>{s.value='';s.className='csel';});
