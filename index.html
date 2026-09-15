@@ -162,6 +162,8 @@ body{display:flex;flex-direction:column;overflow:hidden}
 .status{text-align:center;padding:20px;color:var(--mut);font-size:13px}
 .dup-warn{display:none;background:#E8F5E9;border:1.5px solid #4CAF50;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px;font-weight:600;color:#2E7D32}
 .saved-badge{display:inline-block;font-size:10px;font-weight:700;background:rgba(76,175,80,.18);color:#2E7D32;border:1px solid #4CAF50;border-radius:4px;padding:1px 6px;margin-left:6px;vertical-align:middle}
+.edit-btn{font-size:10px;font-weight:700;background:none;border:1px solid var(--mut);color:var(--mut);border-radius:4px;padding:1px 6px;margin-left:3px;cursor:pointer;vertical-align:middle;transition:border-color .15s,color .15s}
+.edit-btn:hover{border-color:var(--i);color:var(--i)}
 select.csel:disabled{opacity:.7;cursor:default;background:var(--sur2)}
 .success-toast{position:fixed;top:calc(env(safe-area-inset-top,0) + 60px);left:50%;transform:translateX(-50%);background:#2E7D32;color:#fff;padding:10px 20px;border-radius:100px;font-weight:700;font-size:13px;z-index:200;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
 .success-toast.show{opacity:1}
@@ -784,6 +786,7 @@ function initFormGrid() {
           ${avSvg(p,20)}
           <span class="prow-nm" style="color:${p.c}">${p.name}</span>
           <span class="saved-badge" id="saved-badge-${p.name}" style="display:none">✓ Salvo</span>
+          <button class="edit-btn" id="edit-btn-${p.name}" style="display:none" onclick="unlockPlayerRow('${p.name}')">✏️ Editar</button>
         </div>
       </td>
       ${[0,1,2,3,4].map(ci=>`
@@ -805,7 +808,21 @@ function resetFormGrid() {
     if (el) { el.textContent='—'; el.style.background=''; el.style.border=''; }
     const b = $(`saved-badge-${p.name}`);
     if (b) b.style.display='none';
+    const eb = $(`edit-btn-${p.name}`);
+    if (eb) eb.style.display='none';
   });
+}
+
+function unlockPlayerRow(playerName) {
+  delete savedPlayersForDate[playerName];
+  document.querySelectorAll(`select[data-player="${playerName}"]`).forEach(s => { s.disabled=false; });
+  const ptsEl = $(`pts-${playerName}`);
+  if (ptsEl) { ptsEl.style.background=''; ptsEl.style.border=''; }
+  const b = $(`saved-badge-${playerName}`);
+  if (b) b.style.display='none';
+  const eb = $(`edit-btn-${playerName}`);
+  if (eb) eb.style.display='none';
+  checkFormReady();
 }
 
 function lockPlayerRow(p, playerData) {
@@ -819,6 +836,8 @@ function lockPlayerRow(p, playerData) {
   if (ptsEl) { ptsEl.textContent = playerData.total ?? '—'; ptsEl.style.background='rgba(76,175,80,.12)'; ptsEl.style.border='1px solid #4CAF50'; }
   const b = $(`saved-badge-${p.name}`);
   if (b) b.style.display = 'inline-block';
+  const eb = $(`edit-btn-${p.name}`);
+  if (eb) eb.style.display = 'inline-block';
 }
 
 function onSelChange(sel) {
