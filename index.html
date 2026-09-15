@@ -988,7 +988,8 @@ async function saveDay() {
     btn.disabled=true; btn.textContent='Salvar Dia';
     loadHistory();
   } catch(e) {
-    showToast('❌ Erro ao salvar');
+    console.error('saveDay error:', e);
+    showToast('❌ ' + (e?.message || e?.toString() || 'Erro ao salvar'));
     btn.disabled=false; btn.textContent='Salvar Dia';
   }
 }
