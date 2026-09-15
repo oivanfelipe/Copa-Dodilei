@@ -393,6 +393,22 @@ function getLiveTotals() {
   return t;
 }
 
+// Compute "15–19 set" date range for a given month name + week number (2026 tournament)
+function weekPeriodLabel(mes, semana) {
+  const monthIdx = MES_MAP.indexOf(mes);
+  if (monthIdx < 0) return `S${semana}`;
+  const firstDow = new Date(2026, monthIdx, 1).getDay(); // 0=Sun
+  const adjFirst = firstDow === 0 ? 6 : firstDow - 1;
+  const monDate = 1 + (semana - 1) * 7 - adjFirst;
+  const mon = new Date(2026, monthIdx, monDate);
+  const fri = new Date(2026, monthIdx, monDate + 4);
+  const fmtD = d => d.getDate();
+  const fmtM = d => MES_MAP[d.getMonth()].slice(0,3).toLowerCase();
+  return mon.getMonth() === fri.getMonth()
+    ? `${fmtD(mon)}–${fmtD(fri)} ${fmtM(mon)}`
+    : `${fmtD(mon)} ${fmtM(mon)}–${fmtD(fri)} ${fmtM(fri)}`;
+}
+
 function getLiveHist() {
   // Deep copy of locked base
   const result = {};
@@ -408,7 +424,7 @@ function getLiveHist() {
     Object.entries(md.weeks).forEach(([sem, wt]) => {
       const label = 'S'+sem;
       if (!result[mes].weeks.some(w=>w.l===label)) {
-        result[mes].weeks.push({ l:label, p:'Semana '+sem+' de '+mes, t:{...wt}, dynamic:true });
+        result[mes].weeks.push({ l:label, p:weekPeriodLabel(mes, parseInt(sem)), t:{...wt}, partial:true });
       }
     });
     result[mes].weeks.sort((a,b)=>parseInt(a.l.slice(1))-parseInt(b.l.slice(1)));
@@ -435,12 +451,12 @@ const HMASS = [
   {d:'15/06',pl:'Marcelo',v:20},{d:'25/06',pl:'Braghetta',v:19},{d:'05/08',pl:'Pureza',v:19},
 ];
 const MOM = [
-  {cat:'Líder da semana',txt:'Pureza lidera a S3 com 25 pts',t:'b'},
-  {cat:'Lanterna',txt:'Ivan: 0 pts na S3 de Setembro',t:'r'},
-  {cat:'Bateu na trave',txt:'Pureza: 1 vice sem título esta semana',t:'o'},
-  {cat:'Feito histórico',txt:'Ivan fez 7a0 em 18/09 — último do mês!',t:'g'},
-  {cat:'Seca em curso',txt:'Pureza: 6 Copas seguidas sem vencer',t:'r'},
-  {cat:'História do mês',txt:'Braghetta domina Setembro com 308 pts',t:'b'},
+  {cat:'Situação atual',txt:'Setembro em andamento — S3 começa hoje (15 set)',t:'b'},
+  {cat:'Líder geral',txt:'Pureza na frente: 1.854 pts acumulados',t:'b'},
+  {cat:'Liderança do mês',txt:'Braghetta domina Set com 287 pts até S2',t:'pk'},
+  {cat:'Feito histórico',txt:'Ivan fez 7a0 em 18/09 (S3 ainda não lançada)',t:'g'},
+  {cat:'Seca em curso',txt:'Ivan: menor total geral — 1.283 pts',t:'r'},
+  {cat:'Destaque',txt:'Lance os jogos da S3 para atualizar o dashboard',t:'o'},
 ];
 
 const $ = id => document.getElementById(id);
