@@ -971,15 +971,11 @@ async function saveDay() {
   });
 
   try {
-    let error;
-    if (recordedDates.has(dateStr)) {
-      ({ error } = await SB.from(TABLE).update({ ts: Date.now(), ...playerData }).eq('data', dateStr));
-    } else {
-      ({ error } = await SB.from(TABLE).insert({
-        data: dateStr, mes: info.mes, semana: info.semana,
-        dia_semana: info.diaSemana, ts: Date.now(), ...playerData,
-      }));
-    }
+    const row = {
+      data: dateStr, mes: info.mes, semana: info.semana,
+      dia_semana: info.diaSemana, ts: Date.now(), ...playerData,
+    };
+    const { error } = await SB.from(TABLE).upsert(row, { onConflict: 'data' });
     if (error) throw error;
     recordedDates.add(dateStr);
     showToast('✓ Dia salvo!');
