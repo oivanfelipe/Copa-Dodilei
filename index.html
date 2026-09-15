@@ -160,7 +160,9 @@ body{display:flex;flex-direction:column;overflow:hidden}
 .hday-pl{display:flex;align-items:center;gap:4px;background:var(--sur2);border-radius:6px;padding:3px 7px}
 .hday-plpts{font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:14px}
 .status{text-align:center;padding:20px;color:var(--mut);font-size:13px}
-.dup-warn{display:none;background:#FFF3E0;border:1.5px solid var(--m);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px;font-weight:600;color:#E65100}
+.dup-warn{display:none;background:#E8F5E9;border:1.5px solid #4CAF50;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px;font-weight:600;color:#2E7D32}
+.saved-badge{display:inline-block;font-size:10px;font-weight:700;background:rgba(76,175,80,.18);color:#2E7D32;border:1px solid #4CAF50;border-radius:4px;padding:1px 6px;margin-left:6px;vertical-align:middle}
+select.csel:disabled{opacity:.7;cursor:default;background:var(--sur2)}
 .success-toast{position:fixed;top:calc(env(safe-area-inset-top,0) + 60px);left:50%;transform:translateX(-50%);background:#2E7D32;color:#fff;padding:10px 20px;border-radius:100px;font-weight:700;font-size:13px;z-index:200;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
 .success-toast.show{opacity:1}
 @media(min-width:640px){
@@ -222,7 +224,7 @@ body{display:flex;flex-direction:column;overflow:hidden}
       <div class="lform">
         <input type="date" class="ldate" id="ldate">
         <div class="lmeta" id="lmeta">Selecione uma data</div>
-        <div class="dup-warn" id="dup-warn">⚠️ Este dia já foi registrado. Selecione outra data.</div>
+        <div class="dup-warn" id="dup-warn">✓ Dia parcialmente registrado — jogadores salvos aparecem bloqueados. Complete os demais e salve.</div>
         <div style="overflow-x:auto">
           <table class="cgrid" id="cgrid">
             <thead><tr>
@@ -770,6 +772,8 @@ function getMesInfo(dateStr) {
 }
 
 let formState = {};
+let savedPlayersForDate = {};
+let existingRowData = null;
 
 function initFormGrid() {
   PL.forEach(p => { formState[p.name] = ['','','','','']; });
@@ -779,6 +783,7 @@ function initFormGrid() {
         <div class="prow-hd">
           ${avSvg(p,20)}
           <span class="prow-nm" style="color:${p.c}">${p.name}</span>
+          <span class="saved-badge" id="saved-badge-${p.name}" style="display:none">✓ Salvo</span>
         </div>
       </td>
       ${[0,1,2,3,4].map(ci=>`
@@ -790,6 +795,30 @@ function initFormGrid() {
         </td>`).join('')}
       <td><span class="pts-badge" id="pts-${p.name}" style="color:${p.c}">—</span></td>
     </tr>`).join('');
+}
+
+function resetFormGrid() {
+  PL.forEach(p => { formState[p.name] = ['','','','','']; });
+  document.querySelectorAll('.csel').forEach(s => { s.value=''; s.disabled=false; s.className='csel'; });
+  PL.forEach(p => {
+    const el = $(`pts-${p.name}`);
+    if (el) { el.textContent='—'; el.style.background=''; el.style.border=''; }
+    const b = $(`saved-badge-${p.name}`);
+    if (b) b.style.display='none';
+  });
+}
+
+function lockPlayerRow(p, playerData) {
+  const copas = playerData.copas || [];
+  document.querySelectorAll(`select[data-player="${p.name}"]`).forEach((s, i) => {
+    if (copas[i]) { s.value = copas[i]; s.className = `csel r-${copas[i]}`; }
+    s.disabled = true;
+  });
+  formState[p.name] = copas.length === 5 ? [...copas] : ['','','','',''];
+  const ptsEl = $(`pts-${p.name}`);
+  if (ptsEl) { ptsEl.textContent = playerData.total ?? '—'; ptsEl.style.background='rgba(76,175,80,.12)'; ptsEl.style.border='1px solid #4CAF50'; }
+  const b = $(`saved-badge-${p.name}`);
+  if (b) b.style.display = 'inline-block';
 }
 
 function onSelChange(sel) {
@@ -809,24 +838,47 @@ function updatePlayerTotal(player) {
 
 function checkFormReady() {
   const dateOk = !!$('ldate').value;
-  const allFilled = PL.every(p=>formState[p.name].every(c=>!!c));
-  $('sbtn').disabled = !(dateOk && allFilled);
+  if (!dateOk) { $('sbtn').disabled = true; return; }
+  const hasNew = PL.some(p => !savedPlayersForDate[p.name] && formState[p.name].every(c=>!!c));
+  $('sbtn').disabled = !hasNew;
 }
 
-function onDateChange() {
+async function onDateChange() {
   const v = $('ldate').value;
   const dupEl = $('dup-warn');
+  savedPlayersForDate = {};
+  existingRowData = null;
+  resetFormGrid();
   if (!v) {
     $('lmeta').textContent = 'Selecione uma data';
     dupEl.style.display = 'none';
-    checkFormReady();
+    $('sbtn').disabled = true;
     return;
   }
   const info = getMesInfo(v);
   $('lmeta').textContent = `${info.mes} · Semana ${info.semana} · ${info.diaSemana}${!info.isWeekday?' ⚠️ Fim de semana':''}`;
-  const isDup = recordedDates.has(v);
-  dupEl.style.display = isDup ? 'block' : 'none';
-  if (isDup) { $('sbtn').disabled = true; return; }
+  if (recordedDates.has(v) && SB) {
+    try {
+      const { data } = await SB.from(TABLE).select('*').eq('data', v).single();
+      if (data) {
+        existingRowData = data;
+        PL.forEach(p => {
+          const pd = data[p.name.toLowerCase()];
+          if (pd && pd.copas && pd.copas.length === 5) {
+            savedPlayersForDate[p.name] = true;
+            lockPlayerRow(p, pd);
+          }
+        });
+        const allSaved = PL.every(p => savedPlayersForDate[p.name]);
+        dupEl.style.display = allSaved ? 'none' : 'block';
+        dupEl.textContent = allSaved
+          ? ''
+          : '✓ Dia parcialmente registrado — jogadores salvos aparecem bloqueados. Complete os demais e salve.';
+      }
+    } catch(e) {}
+  } else {
+    dupEl.style.display = 'none';
+  }
   checkFormReady();
 }
 
@@ -901,17 +953,14 @@ async function saveDay() {
   btn.disabled = true;
   btn.textContent = 'Salvando...';
 
-  const row = {
-    data:       dateStr,
-    mes:        info.mes,
-    semana:     info.semana,
-    dia_semana: info.diaSemana,
-    ts:         Date.now(),
-  };
-  PL.forEach(p => {
+  const playersToSave = PL.filter(p => !savedPlayersForDate[p.name] && formState[p.name].every(c=>!!c));
+  if (!playersToSave.length) { btn.disabled=false; btn.textContent='Salvar Dia'; return; }
+
+  const playerData = {};
+  playersToSave.forEach(p => {
     const copas = formState[p.name];
     const total = copas.reduce((s,r)=>s+(PONTOS[r]||0),0);
-    row[p.name.toLowerCase()] = {
+    playerData[p.name.toLowerCase()] = {
       copas, total,
       copasV:  copas.filter(r=>FLAGS[r]?.t).length,
       vices:   copas.filter(r=>r==='vice').length,
@@ -922,15 +971,24 @@ async function saveDay() {
   });
 
   try {
-    const { error } = await SB.from(TABLE).upsert(row, { onConflict: 'data' });
+    let error;
+    if (recordedDates.has(dateStr)) {
+      ({ error } = await SB.from(TABLE).update({ ts: Date.now(), ...playerData }).eq('data', dateStr));
+    } else {
+      ({ error } = await SB.from(TABLE).insert({
+        data: dateStr, mes: info.mes, semana: info.semana,
+        dia_semana: info.diaSemana, ts: Date.now(), ...playerData,
+      }));
+    }
     if (error) throw error;
     recordedDates.add(dateStr);
     showToast('✓ Dia salvo!');
-    PL.forEach(p=>{ formState[p.name]=['','','','','']; });
-    document.querySelectorAll('.csel').forEach(s=>{s.value='';s.className='csel';});
-    PL.forEach(p=>{ const el=$(`pts-${p.name}`); if(el)el.textContent='—'; });
+    savedPlayersForDate = {};
+    existingRowData = null;
+    resetFormGrid();
     $('ldate').value='';
     $('lmeta').textContent='Selecione uma data';
+    $('dup-warn').style.display='none';
     btn.disabled=true; btn.textContent='Salvar Dia';
     loadHistory();
   } catch(e) {
