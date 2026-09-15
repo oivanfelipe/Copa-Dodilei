@@ -331,8 +331,8 @@ const HIST = {
   Setembro:{
     totals:{Pureza:219,Braghetta:287,Marcelo:219,Ivan:206},winner:'Braghetta',done:false,
     weeks:[
-      {l:'S1',p:'1–5 set',t:{Pureza:89,Braghetta:132,Marcelo:85,Ivan:99}},
-      {l:'S2',p:'8–12 set',t:{Pureza:130,Braghetta:155,Marcelo:134,Ivan:107}},
+      {l:'S1',p:'31 ago–4 set',t:{Pureza:89,Braghetta:132,Marcelo:85,Ivan:99}},
+      {l:'S2',p:'7–11 set',t:{Pureza:130,Braghetta:155,Marcelo:134,Ivan:107}},
     ]
   },
 };
@@ -393,11 +393,16 @@ function getLiveTotals() {
   return t;
 }
 
-// Compute "15–19 set" date range for a given month name + week number (2026 tournament)
+const WEEK_PERIODS = {
+  Setembro: { 1:'31 ago–4 set', 2:'7–11 set', 3:'21–24 set', 4:'28 set–2 out' },
+  Outubro:  { 1:'28 set–2 out', 2:'5–9 out', 3:'12–16 out', 4:'19–23 out', 5:'26–30 out' },
+};
+
 function weekPeriodLabel(mes, semana) {
+  if (WEEK_PERIODS[mes]?.[semana]) return WEEK_PERIODS[mes][semana];
   const monthIdx = MES_MAP.indexOf(mes);
   if (monthIdx < 0) return `S${semana}`;
-  const firstDow = new Date(2026, monthIdx, 1).getDay(); // 0=Sun
+  const firstDow = new Date(2026, monthIdx, 1).getDay();
   const adjFirst = firstDow === 0 ? 6 : firstDow - 1;
   const monDate = 1 + (semana - 1) * 7 - adjFirst;
   const mon = new Date(2026, monthIdx, monDate);
@@ -451,7 +456,7 @@ const HMASS = [
   {d:'15/06',pl:'Marcelo',v:20},{d:'25/06',pl:'Braghetta',v:19},{d:'05/08',pl:'Pureza',v:19},
 ];
 const MOM = [
-  {cat:'Situação atual',txt:'Setembro em andamento — S3: 14–18 set (em curso)',t:'b'},
+  {cat:'Situação atual',txt:'Setembro em andamento — S3: 21–24 set (em curso)',t:'b'},
   {cat:'Líder geral',txt:'Pureza na frente: 1.854 pts acumulados',t:'b'},
   {cat:'Liderança do mês',txt:'Braghetta domina Set com 287 pts até S2',t:'pk'},
   {cat:'Feito histórico',txt:'Ivan fez 7a0 em 18/09 (S3 ainda não lançada)',t:'g'},
