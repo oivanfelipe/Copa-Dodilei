@@ -436,6 +436,20 @@ function getLiveHist() {
     PL.forEach(p => { result[mes].totals[p.name]=(result[mes].totals[p.name]||0)+(md.totals[p.name]||0); });
     if (!result[mes].done) result[mes].winner = sortP(result[mes].totals)[0].name;
   });
+  // Sempre garante card da semana atual no mês em curso
+  try {
+    const today = new Date();
+    const todayMes = MES_MAP[today.getMonth()];
+    if (result[todayMes] && !result[todayMes].done) {
+      const info = getMesInfo(today.toISOString().slice(0,10));
+      const semLabel = 'S' + info.semana;
+      if (!result[todayMes].weeks.some(w=>w.l===semLabel)) {
+        const emptyT={}; PL.forEach(p=>emptyT[p.name]=0);
+        result[todayMes].weeks.push({ l:semLabel, p:weekPeriodLabel(todayMes, info.semana), t:emptyT, partial:true });
+        result[todayMes].weeks.sort((a,b)=>parseInt(a.l.slice(1))-parseInt(b.l.slice(1)));
+      }
+    }
+  } catch(e) {}
   return result;
 }
 
