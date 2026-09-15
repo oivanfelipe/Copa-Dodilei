@@ -329,17 +329,16 @@ const HIST = {
     ]
   },
   Setembro:{
-    totals:{Pureza:244,Braghetta:308,Marcelo:233,Ivan:206},winner:'Braghetta',done:false,
+    totals:{Pureza:219,Braghetta:287,Marcelo:219,Ivan:206},winner:'Braghetta',done:false,
     weeks:[
       {l:'S1',p:'1–5 set',t:{Pureza:89,Braghetta:132,Marcelo:85,Ivan:99}},
       {l:'S2',p:'8–12 set',t:{Pureza:130,Braghetta:155,Marcelo:134,Ivan:107}},
-      {l:'S3',p:'15–19 set',partial:true,t:{Pureza:25,Braghetta:21,Marcelo:14,Ivan:0}},
     ]
   },
 };
 
 const STATS = {
-  totals:    {Pureza:1879,Braghetta:1864,Marcelo:1773,Ivan:1283},
+  totals:    {Pureza:1854,Braghetta:1843,Marcelo:1759,Ivan:1283},
   mensais:   {Pureza:3,Braghetta:0,Marcelo:0,Ivan:0},
   semanais:  {Pureza:6,Braghetta:6,Marcelo:2,Ivan:0},
   diarios:   {Pureza:23,Braghetta:24,Marcelo:20,Ivan:7},
@@ -363,6 +362,61 @@ const STATS = {
   seqMmax:   {Pureza:3,Braghetta:0,Marcelo:0,Ivan:0},
   seqMat:    {Pureza:3,Braghetta:0,Marcelo:0,Ivan:0},
 };
+
+// Base totals locked through Sep S2 (hardcoded months Jun/Jul/Aug + Sep S1+S2)
+const BASE_TOTALS = {Pureza:1854,Braghetta:1843,Marcelo:1759,Ivan:1283};
+
+// Dynamic data populated from Supabase after each loadHistory()
+let dynData = {}; // { [mes]: { weeks: { [sem]: {Player:pts} }, totals: {Player:pts} } }
+
+function computeDynData(docs) {
+  dynData = {};
+  docs.filter(d=>d.exists).forEach(d => {
+    const day = d.data();
+    const mes = day.mes, sem = String(day.semana);
+    if (!dynData[mes]) dynData[mes] = { weeks:{}, totals:{} };
+    const wd = dynData[mes].weeks;
+    if (!wd[sem]) { wd[sem]={}; PL.forEach(p=>wd[sem][p.name]=0); }
+    PL.forEach(p => {
+      const pts = day[p.name]?.total||0;
+      wd[sem][p.name] += pts;
+      dynData[mes].totals[p.name] = (dynData[mes].totals[p.name]||0) + pts;
+    });
+  });
+}
+
+function getLiveTotals() {
+  const t = {...BASE_TOTALS};
+  Object.values(dynData).forEach(md => {
+    PL.forEach(p => { t[p.name] = (t[p.name]||0) + (md.totals[p.name]||0); });
+  });
+  return t;
+}
+
+function getLiveHist() {
+  // Deep copy of locked base
+  const result = {};
+  Object.entries(HIST).forEach(([m,d]) => {
+    result[m] = { ...d, totals:{...d.totals}, weeks:d.weeks.map(w=>({...w,t:{...w.t}})) };
+  });
+  // Merge Supabase dynamic rows
+  Object.entries(dynData).forEach(([mes, md]) => {
+    if (!result[mes]) {
+      const initT={}; PL.forEach(p=>initT[p.name]=0);
+      result[mes] = { totals:initT, winner:null, done:false, weeks:[] };
+    }
+    Object.entries(md.weeks).forEach(([sem, wt]) => {
+      const label = 'S'+sem;
+      if (!result[mes].weeks.some(w=>w.l===label)) {
+        result[mes].weeks.push({ l:label, p:'Semana '+sem+' de '+mes, t:{...wt}, dynamic:true });
+      }
+    });
+    result[mes].weeks.sort((a,b)=>parseInt(a.l.slice(1))-parseInt(b.l.slice(1)));
+    PL.forEach(p => { result[mes].totals[p.name]=(result[mes].totals[p.name]||0)+(md.totals[p.name]||0); });
+    if (!result[mes].done) result[mes].winner = sortP(result[mes].totals)[0].name;
+  });
+  return result;
+}
 
 const HFAMA = [
   {d:'07/07',pl:'Pureza',v:51},{d:'20/08',pl:'Marcelo',v:51},
@@ -411,7 +465,8 @@ function avHtml(p, sizeClass='av-md') {
 }
 
 function renderPodium() {
-  const s = sortP(STATS.totals);
+  const totals = getLiveTotals();
+  const s = sortP(totals);
   const ord = [s[1],s[0],s[2]];
   const hs  = [100,136,80];
   const avC = ['av-md','av-xl','av-sm'];
@@ -420,7 +475,7 @@ function renderPodium() {
     <div class="pcol">
       ${avHtml(p, avC[i])}
       <div class="pnm" style="color:${p.c}">${p.name}</div>
-      <div class="ptot${i===1?' big':''}">${STATS.totals[p.name].toLocaleString('pt-BR')}</div>
+      <div class="ptot${i===1?' big':''}">${totals[p.name].toLocaleString('pt-BR')}</div>
       <div class="pbar" style="background:${p.c};height:${hs[i]}px">
         <span class="ppos">${pos[i]}</span>
       </div>
@@ -428,8 +483,10 @@ function renderPodium() {
 }
 
 function renderRank() {
-  const mn = Object.keys(HIST);
-  const s  = sortP(STATS.totals);
+  const liveHist = getLiveHist();
+  const liveTotals = getLiveTotals();
+  const mn = Object.keys(liveHist);
+  const s  = sortP(liveTotals);
   $('rtbl').innerHTML = `<thead><tr>
     <th style="text-align:left">Jogador</th>
     ${mn.map(m=>`<th>${m.slice(0,3)}</th>`).join('')}
@@ -440,8 +497,8 @@ function renderRank() {
       ${avHtml(p,'av-sm')}
       <span class="rnm">${p.name}</span>
     </div></td>
-    ${mn.map(m=>`<td class="rmo">${HIST[m].totals[p.name]}</td>`).join('')}
-    <td><span class="rtot" style="color:${p.c}">${STATS.totals[p.name].toLocaleString('pt-BR')}</span></td>
+    ${mn.map(m=>`<td class="rmo">${liveHist[m].totals[p.name]||0}</td>`).join('')}
+    <td><span class="rtot" style="color:${p.c}">${liveTotals[p.name].toLocaleString('pt-BR')}</span></td>
   </tr>`).join('')}</tbody>`;
 }
 
@@ -473,15 +530,18 @@ function renderTitles() {
   }).join('');
 }
 
+let chartInst = null;
 function renderChart() {
+  if (chartInst) { chartInst.destroy(); chartInst = null; }
+  const liveHist = getLiveHist();
   const ctx = $('mc').getContext('2d');
-  const lbls = Object.keys(HIST);
+  const lbls = Object.keys(liveHist);
   const gc = 'rgba(0,0,0,.06)';
   const tc = '#8890AA';
-  new Chart(ctx, {
+  chartInst = new Chart(ctx, {
     type:'line',
     data:{labels:lbls,datasets:PL.map(p=>({
-      label:p.name, data:lbls.map(m=>HIST[m].totals[p.name]||0),
+      label:p.name, data:lbls.map(m=>liveHist[m].totals[p.name]||0),
       borderColor:p.c, backgroundColor:p.c+'18',
       borderWidth:2.5, pointBackgroundColor:p.c,
       pointRadius:4, pointHoverRadius:6, fill:false, tension:.3,
@@ -501,12 +561,13 @@ function renderChart() {
 }
 
 function renderMonths() {
-  const keys = Object.keys(HIST);
+  const liveHist = getLiveHist();
+  const keys = Object.keys(liveHist);
   $('mcs').innerHTML = keys.map((m,i) =>
     `<button class="mc${i===keys.length-1?' active':''}" onclick="goMonth('${m}')">${m}</button>`
   ).join('');
   $('mvs').innerHTML = keys.map((m,i) => {
-    const d = HIST[m];
+    const d = liveHist[m];
     const s = sortP(d.totals);
     const active = i===keys.length-1;
     const wpl = PL.find(p=>p.name===d.winner);
@@ -633,7 +694,7 @@ function renderPvc() {
       <div class="mtxt">${m.txt}</div>
     </div>`).join('');
   pvcTbl('rx',[
-    {lbl:'Pontos Totais',          m:STATS.totals,  hl:true,hi:true},
+    {lbl:'Pontos Totais',          m:getLiveTotals(),hl:true,hi:true},
     {lbl:'Pts por Copa',           m:STATS.ppc,     hl:true,hi:true},
     {lbl:'Copas p/ vencer',        m:STATS.cpv,     hl:true,hi:false},
     {lbl:'Instab. (desvio padrão)',m:STATS.dp,      hl:false,hi:false},
@@ -768,9 +829,11 @@ async function loadHistory() {
       .from(TABLE)
       .select('*')
       .order('data', { ascending: false })
-      .limit(30);
+      .limit(500);
     if (error) throw error;
     const docs = (data || []).map(rowToDoc);
+    computeDynData(docs);
+    refreshDashboard();
     renderHistory(docs);
     syncDateSet(docs);
   } catch(e) { renderHistoryFallback(); }
@@ -881,6 +944,13 @@ function goTab(name, btn) {
   $('tab-'+name).classList.add('active');
   btn.classList.add('active');
   document.querySelector('.main').scrollTop=0;
+}
+
+function refreshDashboard() {
+  renderPodium();
+  renderRank();
+  renderChart();
+  renderMonths();
 }
 
 function init() {
