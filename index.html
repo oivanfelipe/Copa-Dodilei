@@ -5,6 +5,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800;900&family=Inter:wght@400;500;600;700&display=swap">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
 :root{
   --bg:#ffffff;--sur:#F4F6FB;--sur2:#E8ECF6;--txt:#0A0A16;--txt2:#4A4E68;
@@ -733,61 +734,45 @@ function onDateChange() {
   checkFormReady();
 }
 
-let DB = null;
+const SUPA_URL = 'https://mzwynanvhojzyoirvxkc.supabase.co';
+const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im16d3luYW52aG9qenlvaXJ2eGtjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU5Mjc3NjEsImV4cCI6MjEwMTUwMzc2MX0.UniVWAVDJgyHo8QGlqXjMeTBulsjEDdZ5nyBWowYO2s';
+const TABLE = 'dias_copa';
+let SB = null;
 let recordedDates = new Set();
 
-// localStorage adapter — same interface as Artifact db, used when outside claude.ai
-function makeLocalDB() {
-  const LS_KEY = 'copa_dias_v1';
-  function readAll() {
-    try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}'); } catch(e) { return {}; }
-  }
-  function writeAll(data) {
-    try { localStorage.setItem(LS_KEY, JSON.stringify(data)); } catch(e) {}
-  }
-  function makeDocs(all, lim) {
-    let docs = Object.entries(all).map(([id, d]) => ({
-      id, exists: true, data: () => d
-    }));
-    docs.sort((a, b) => b.data().data.localeCompare(a.data().data));
-    return lim ? docs.slice(0, lim) : docs;
-  }
-  let _lim = 30;
-  const col = {
-    orderBy() { return col; },
-    limit(n) { _lim = n; return col; },
-    async get() { return { docs: makeDocs(readAll(), _lim) }; },
-    onSnapshot(cb) { col.get().then(snap => cb(snap)); },
-    doc(id) {
-      return {
-        async set(data) { const all = readAll(); all[id] = data; writeAll(all); },
-        async get() { const all = readAll(); return { exists: !!all[id], data: () => all[id] }; }
-      };
-    }
-  };
-  return { collection() { _lim = 30; return col; } };
+function initSupabase() {
+  try { SB = window.supabase.createClient(SUPA_URL, SUPA_KEY); } catch(e) {}
 }
 
-async function initDb() {
-  try {
-    DB = await window.claude?.use('db');
-    if (!DB) DB = makeLocalDB();
-  } catch(e) {
-    DB = makeLocalDB();
-  }
-  await loadHistory();
-  try {
-    DB.collection('dias').orderBy('data','desc').limit(30)
-      .onSnapshot(snap => { renderHistory(snap.docs); syncDateSet(snap.docs); }, () => {});
-  } catch(e) {}
+// Row from Supabase → same shape used by renderHistory
+function rowToDoc(row) {
+  // flatten player keys back to the format the rest of the app expects
+  const d = {
+    data:      row.data,
+    mes:       row.mes,
+    semana:    row.semana,
+    diaSemana: row.dia_semana,
+    ts:        row.ts,
+    Marcelo:   row.marcelo,
+    Ivan:      row.ivan,
+    Pureza:    row.pureza,
+    Braghetta: row.braghetta,
+  };
+  return { exists: true, data: () => d };
 }
 
 async function loadHistory() {
-  if (!DB) return;
+  if (!SB) { renderHistoryFallback(); return; }
   try {
-    const snap = await DB.collection('dias').orderBy('data','desc').limit(30).get();
-    renderHistory(snap.docs);
-    syncDateSet(snap.docs);
+    const { data, error } = await SB
+      .from(TABLE)
+      .select('*')
+      .order('data', { ascending: false })
+      .limit(30);
+    if (error) throw error;
+    const docs = (data || []).map(rowToDoc);
+    renderHistory(docs);
+    syncDateSet(docs);
   } catch(e) { renderHistoryFallback(); }
 }
 
@@ -798,18 +783,37 @@ function syncDateSet(docs) {
   onDateChange();
 }
 
+async function initDb() {
+  initSupabase();
+  await loadHistory();
+  // Realtime subscription
+  if (SB) {
+    SB.channel('dias-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: TABLE },
+          () => loadHistory())
+      .subscribe();
+  }
+}
+
 async function saveDay() {
   const dateStr = $('ldate').value;
-  if (!dateStr || !DB) return;
+  if (!dateStr || !SB) return;
   const info = getMesInfo(dateStr);
   const btn = $('sbtn');
   btn.disabled = true;
   btn.textContent = 'Salvando...';
-  const docData = { data:dateStr, mes:info.mes, semana:info.semana, diaSemana:info.diaSemana, ts:Date.now() };
+
+  const row = {
+    data:       dateStr,
+    mes:        info.mes,
+    semana:     info.semana,
+    dia_semana: info.diaSemana,
+    ts:         Date.now(),
+  };
   PL.forEach(p => {
     const copas = formState[p.name];
     const total = copas.reduce((s,r)=>s+(PONTOS[r]||0),0);
-    docData[p.name] = {
+    row[p.name.toLowerCase()] = {
       copas, total,
       copasV:  copas.filter(r=>FLAGS[r]?.t).length,
       vices:   copas.filter(r=>r==='vice').length,
@@ -818,8 +822,10 @@ async function saveDay() {
       s7:      copas.filter(r=>FLAGS[r]?.s7).length,
     };
   });
+
   try {
-    await DB.collection('dias').doc(dateStr).set(docData);
+    const { error } = await SB.from(TABLE).upsert(row, { onConflict: 'data' });
+    if (error) throw error;
     recordedDates.add(dateStr);
     showToast('✓ Dia salvo!');
     PL.forEach(p=>{ formState[p.name]=['','','','','']; });
@@ -828,6 +834,7 @@ async function saveDay() {
     $('ldate').value='';
     $('lmeta').textContent='Selecione uma data';
     btn.disabled=true; btn.textContent='Salvar Dia';
+    loadHistory();
   } catch(e) {
     showToast('❌ Erro ao salvar');
     btn.disabled=false; btn.textContent='Salvar Dia';
