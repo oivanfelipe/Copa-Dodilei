@@ -424,7 +424,7 @@ function getLiveTotals() {
 
 const WEEK_PERIODS = {
   Setembro: { 1:'31 ago–4 set', 2:'7–11 set', 3:'14–18 set', 4:'21–25 set', 5:'28 set–2 out' },
-  Outubro:  { 1:'28 set–2 out', 2:'5–9 out', 3:'12–16 out', 4:'19–23 out', 5:'26–30 out' },
+  Outubro:  { 2:'5–9 out', 3:'12–16 out', 4:'19–23 out', 5:'26–30 out' },
 };
 
 function weekPeriodLabel(mes, semana) {
@@ -937,11 +937,16 @@ const DIA_MAP = ['domingo','segunda','terça','quarta','quinta','sexta','sábado
 
 function getMesInfo(dateStr) {
   const d = new Date(dateStr+'T12:00:00');
-  const mes = MES_MAP[d.getMonth()];
-  const day = d.getDate();
-  const firstDow = new Date(d.getFullYear(), d.getMonth(), 1).getDay();
-  const adjFirst = firstDow===0?6:firstDow-1;
-  const semana = Math.ceil((day+adjFirst)/7);
+  // Anchor to Monday of the week: cross-month weeks stay in the month where Monday falls
+  const dow = d.getDay();
+  const adjDow = dow === 0 ? 6 : dow - 1;
+  const monday = new Date(d);
+  monday.setDate(d.getDate() - adjDow);
+  const mes = MES_MAP[monday.getMonth()];
+  const day = monday.getDate();
+  const firstDow = new Date(monday.getFullYear(), monday.getMonth(), 1).getDay();
+  const adjFirst = firstDow === 0 ? 6 : firstDow - 1;
+  const semana = Math.ceil((day + adjFirst) / 7);
   return { mes, semana, diaSemana: DIA_MAP[d.getDay()], isWeekday: d.getDay()>=1&&d.getDay()<=5 };
 }
 
