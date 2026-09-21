@@ -474,7 +474,7 @@ function getLiveHist() {
     PL.forEach(p => { result[mes].totals[p.name]=(result[mes].totals[p.name]||0)+(md.totals[p.name]||0); });
     if (!result[mes].done) result[mes].winner = sortP(result[mes].totals)[0].name;
   });
-  // Sempre garante card da semana atual no mês em curso (ancorando na segunda-feira)
+  // Garante semana atual + semanas futuras definidas no WEEK_PERIODS do mês em curso
   try {
     const today = new Date();
     const info = getMesInfo(today.toISOString().slice(0,10));
@@ -484,8 +484,20 @@ function getLiveHist() {
       if (!result[curMes].weeks.some(w=>w.l===semLabel)) {
         const emptyT={}; PL.forEach(p=>emptyT[p.name]=0);
         result[curMes].weeks.push({ l:semLabel, p:weekPeriodLabel(curMes, info.semana), t:emptyT, partial:true });
-        result[curMes].weeks.sort((a,b)=>parseInt(a.l.slice(1))-parseInt(b.l.slice(1)));
       }
+      if (WEEK_PERIODS[curMes]) {
+        Object.keys(WEEK_PERIODS[curMes]).forEach(wk => {
+          const wkNum = parseInt(wk);
+          if (wkNum > info.semana) {
+            const lbl = 'S' + wkNum;
+            if (!result[curMes].weeks.some(w=>w.l===lbl)) {
+              const emptyT={}; PL.forEach(p=>emptyT[p.name]=0);
+              result[curMes].weeks.push({ l:lbl, p:weekPeriodLabel(curMes, wkNum), t:emptyT, partial:true });
+            }
+          }
+        });
+      }
+      result[curMes].weeks.sort((a,b)=>parseInt(a.l.slice(1))-parseInt(b.l.slice(1)));
     }
   } catch(e) {}
   return result;
