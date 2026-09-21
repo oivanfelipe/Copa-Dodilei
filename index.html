@@ -13,7 +13,7 @@
   --m:#F57C00;--m-bg:#FFF3E0;
   --i:#D32F2F;--i-bg:#FFEBEE;
   --p:#1565C0;--p-bg:#E3F2FD;
-  --b:#C2185B;--b-bg:#FCE4EC;
+  --b:#7B1FA2;--b-bg:#F3E5F5;
   --ok:#2E7D32;--warn:#E65100;
   --gold:#B8860B;--silver:#808088;--bronze:#8B5010;
   --nav-h:60px;
@@ -215,8 +215,10 @@ select.csel:disabled{opacity:.7;cursor:default;background:var(--sur2)}
     </div>
 
     <div class="tab" id="tab-pvc">
-      <div class="sl">Momento da Semana</div>
-      <div class="mgrid" id="mg"></div>
+      <div class="sl">Projeção da Semana</div>
+      <div class="card" id="week-proj" style="padding:12px 14px"><div class="status">Carregando...</div></div>
+      <div class="sl">Distribuição Diária</div>
+      <div id="prob-dist"></div>
       <div class="sl">Raio X — Médias &amp; Eficiência</div>
       <div class="card" style="padding:0 14px"><table class="pt" id="rx"></table></div>
       <div class="sl">Reis da Copa — Conquistas</div>
@@ -301,7 +303,7 @@ const PL = [
   { name:'Marcelo',   c:'#F57C00', bg:'#FFF3E0', i:'M', cls:'--m' },
   { name:'Ivan',      c:'#D32F2F', bg:'#FFEBEE', i:'I', cls:'--i' },
   { name:'Pureza',    c:'#1565C0', bg:'#E3F2FD', i:'P', cls:'--p' },
-  { name:'Braghetta', c:'#C2185B', bg:'#FCE4EC', i:'B', cls:'--b' },
+  { name:'Braghetta', c:'#7B1FA2', bg:'#F3E5F5', i:'B', cls:'--b' },
 ];
 const PC  = n => PL.find(p=>p.name===n)?.c   ?? '#888';
 const PBG = n => PL.find(p=>p.name===n)?.bg  ?? '#F5F5F5';
@@ -482,7 +484,7 @@ function getLiveHist() {
 
 const HFAMA = [
   {d:'07/07',pl:'Pureza',v:51},{d:'20/08',pl:'Marcelo',v:51},
-  {d:'12/08',pl:'Marcelo',v:50},{d:'18/09',pl:'Ivan',v:50},{d:'10/07',pl:'Marcelo',v:49},
+  {d:'12/08',pl:'Marcelo',v:50},{d:'10/07',pl:'Marcelo',v:49},
 ];
 const HVERG = [
   {d:'11/06',pl:'Ivan',v:3},{d:'10/06',pl:'Ivan',v:4},
@@ -495,14 +497,6 @@ const HSEM = [
 const HMASS = [
   {d:'12/08',pl:'Marcelo',v:27},{d:'06/08',pl:'Marcelo',v:23},
   {d:'15/06',pl:'Marcelo',v:20},{d:'25/06',pl:'Braghetta',v:19},{d:'05/08',pl:'Pureza',v:19},
-];
-const MOM = [
-  {cat:'Situação atual',txt:'Setembro em andamento — S3: 14–18 set (em curso)',t:'b'},
-  {cat:'Líder geral',txt:'Pureza na frente: 1.854 pts acumulados',t:'b'},
-  {cat:'Liderança do mês',txt:'Braghetta domina Set com 287 pts até S2',t:'pk'},
-  {cat:'Feito histórico',txt:'Ivan fez 7a0 em 18/09 (S3 ainda não lançada)',t:'g'},
-  {cat:'Seca em curso',txt:'Ivan: menor total geral — 1.283 pts',t:'r'},
-  {cat:'Destaque',txt:'Lance os jogos da S3 para atualizar o dashboard',t:'o'},
 ];
 
 const $ = id => document.getElementById(id);
@@ -787,12 +781,129 @@ function renderSeq() {
   $('sq').innerHTML = head+`<tbody>${body}</tbody>`;
 }
 
+// ── Probability helpers ──────────────────────────────────────────────
+function erfApprox(x) {
+  const sign = x >= 0 ? 1 : -1;
+  x = Math.abs(x);
+  const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911;
+  const t = 1 / (1 + p * x);
+  return sign * (1 - (((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t * Math.exp(-x*x));
+}
+function normalCDF(x, mean, std) {
+  if (std <= 0) return x >= mean ? 1 : 0;
+  return 0.5 * (1 + erfApprox((x - mean) / (std * Math.SQRT2)));
+}
+
+function computeBucketProbs(playerName, buckets) {
+  const allDays = Object.values(dynDays).flat();
+  const playerDays = allDays.filter(d => d.totals[playerName] !== undefined);
+  const mean = STATS.ppc[playerName] * 5;
+  const std  = STATS.dp[playerName];
+
+  const theoretical = buckets.map(([lo, hi]) => {
+    const cdfHi = hi === Infinity ? 1 : normalCDF(hi + 0.5, mean, std);
+    return Math.max(0, cdfHi - normalCDF(Math.max(-0.5, lo - 0.5), mean, std));
+  });
+  const theoSum = theoretical.reduce((s,v)=>s+v, 0);
+  const theoNorm = theoSum > 0 ? theoretical.map(v=>v/theoSum) : buckets.map(()=>1/buckets.length);
+
+  if (playerDays.length === 0) return theoNorm;
+
+  const empirical = buckets.map(([lo, hi]) =>
+    playerDays.filter(d => { const pts=d.totals[playerName]; return pts>=lo&&(hi===Infinity||pts<=hi); }).length / playerDays.length
+  );
+  const mixed = buckets.map((_,i) => 0.9*empirical[i] + 0.1*theoNorm[i]);
+  const mixSum = mixed.reduce((s,v)=>s+v, 0);
+  return mixSum > 0 ? mixed.map(v=>v/mixSum) : mixed;
+}
+
+function getWeekProjection(playerName) {
+  const today = new Date();
+  const info = getMesInfo(today.toISOString().slice(0,10));
+  const key = info.mes + '_' + info.semana;
+  const weekDays = dynDays[key] || [];
+  const accumulated = weekDays.reduce((s,d)=>s+(d.totals[playerName]||0), 0);
+  const played = weekDays.length;
+  const remaining = Math.max(0, 5 - played);
+  const mean = STATS.ppc[playerName] * 5;
+  const std  = STATS.dp[playerName];
+  const projMean = accumulated + remaining * mean;
+  const projStd  = std * Math.sqrt(Math.max(1, remaining));
+  return {
+    accumulated, played, remaining,
+    projMin: Math.max(accumulated, Math.round(projMean - 1.65 * projStd)),
+    projMax: Math.round(projMean + 1.65 * projStd),
+    projMean: Math.round(projMean),
+  };
+}
+
+function renderWeekProj() {
+  const el = $('week-proj');
+  if (!el) return;
+  const today = new Date();
+  const info = getMesInfo(today.toISOString().slice(0,10));
+  const projections = PL.map(p => ({ p, ...getWeekProjection(p.name) }));
+  const maxVal = Math.max(...projections.map(pr => pr.projMax), 1);
+  const sorted = [...projections].sort((a,b) => b.projMean - a.projMean);
+  const played = sorted[0].played;
+
+  el.innerHTML = `<div style="font-size:11px;color:var(--mut);margin-bottom:12px;font-weight:500">
+    ${info.mes} S${info.semana} · ${weekPeriodLabel(info.mes, info.semana)} · ${played} dia${played!==1?'s':''} lançado${played!==1?'s':''}
+  </div>
+  ${sorted.map(({p, accumulated, remaining, projMin, projMax}) => `
+    <div style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+        ${avSvg(p,20)}
+        <span style="font-weight:700;font-size:13px">${p.name}</span>
+        <span style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:22px;color:${p.c}">${accumulated}</span>
+        ${remaining>0
+          ?`<span style="font-size:11px;color:var(--mut)">+${remaining}d restantes</span>`
+          :`<span style="font-size:10px;font-weight:700;background:var(--sur2);padding:1px 6px;border-radius:4px;color:var(--mut)">Semana concluída</span>`}
+        <span style="margin-left:auto;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:14px;color:${p.c}">
+          ${remaining>0?`${projMin}–${projMax}`:accumulated} pts
+        </span>
+      </div>
+      <div style="height:6px;background:var(--sur2);border-radius:3px;overflow:hidden;position:relative">
+        <div style="position:absolute;left:${Math.round((projMin/maxVal)*100)}%;width:${Math.round(((projMax-projMin)/maxVal)*100)}%;height:100%;background:${p.c};opacity:.22;border-radius:3px"></div>
+        <div style="position:absolute;left:0;width:${Math.round((accumulated/maxVal)*100)}%;height:100%;background:${p.c};border-radius:3px"></div>
+      </div>
+    </div>`).join('')}`;
+}
+
+function renderProbDist() {
+  const el = $('prob-dist');
+  if (!el) return;
+  const buckets = [[0,9],[10,19],[20,29],[30,39],[40,49],[50,Infinity]];
+  const labels  = ['0–9','10–19','20–29','30–39','40–49','50+'];
+
+  el.innerHTML = PL.map(p => {
+    const probs = computeBucketProbs(p.name, buckets);
+    const maxP  = Math.max(...probs);
+    return `<div style="background:var(--sur);border-radius:12px;padding:12px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        ${avSvg(p,22)}
+        <span style="font-weight:700;font-size:13px">${p.name}</span>
+        <span style="margin-left:auto;font-size:11px;color:var(--mut)">~${(STATS.ppc[p.name]*5).toFixed(1)} pts/dia · σ ${STATS.dp[p.name]}</span>
+      </div>
+      ${probs.map((prob,i) => {
+        const pct = maxP>0?(prob/maxP)*100:0;
+        const isMode = prob===maxP;
+        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <span style="font-size:11px;font-weight:600;min-width:38px;color:var(--txt2)">${labels[i]}</span>
+          <div style="flex:1;height:6px;background:var(--sur2);border-radius:3px;overflow:hidden">
+            <div style="height:100%;background:${p.c};width:${pct.toFixed(1)}%;border-radius:3px;opacity:${isMode?1:0.5}"></div>
+          </div>
+          <span style="font-size:11px;font-family:'Barlow Condensed',sans-serif;font-weight:${isMode?900:600};min-width:36px;text-align:right;color:${isMode?p.c:'var(--mut)'}">${(prob*100).toFixed(1)}%</span>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }).join('');
+}
+
+// ── /Probability helpers ─────────────────────────────────────────────
 function renderPvc() {
-  $('mg').innerHTML = MOM.map(m=>`
-    <div class="mi ${m.t}">
-      <div class="mcat">${m.cat}</div>
-      <div class="mtxt">${m.txt}</div>
-    </div>`).join('');
+  renderWeekProj();
+  renderProbDist();
   pvcTbl('rx',[
     {lbl:'Pontos Totais',          m:getLiveTotals(),hl:true,hi:true},
     {lbl:'Pts por Copa',           m:STATS.ppc,     hl:true,hi:true},
@@ -1121,6 +1232,8 @@ function refreshDashboard() {
   renderRank();
   renderChart();
   renderMonths();
+  renderWeekProj();
+  renderProbDist();
 }
 
 function init() {
