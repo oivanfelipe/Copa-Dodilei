@@ -175,6 +175,20 @@ select.csel:disabled{opacity:.7;cursor:default;background:var(--sur2)}
   .mgrid{grid-template-columns:1fr}
   .csel{font-size:11px}
 }
+/* DAILY VIEW */
+.wdays-btn{width:100%;margin-top:10px;padding:7px;border-radius:8px;border:1.5px solid var(--brd);background:transparent;color:var(--mut);font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;transition:all .15s;-webkit-tap-highlight-color:transparent;text-align:center;display:block}
+.wdays-btn:hover,.wdays-btn:active{border-color:var(--txt2);color:var(--txt)}
+.wdays{border-top:1px solid var(--brd);margin-top:12px;padding-top:8px}
+.wday{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--brd)}
+.wday:last-child{border-bottom:none}
+.wday-dt{min-width:58px;flex-shrink:0}
+.wday-date{font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:16px;line-height:1}
+.wday-dow{font-size:10px;color:var(--mut);font-weight:600;text-transform:capitalize;margin-top:1px}
+.wday-scores{display:flex;gap:4px;flex:1;justify-content:flex-end}
+.wday-sc{display:flex;flex-direction:column;align-items:center;gap:2px;padding:5px 7px;border-radius:8px;min-width:40px;transition:outline .1s}
+.wday-sc.winner{outline:2.5px solid currentColor}
+.wday-scp{font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:18px;line-height:1}
+.wday-scn{font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
 </style>
 
 <header class="hdr">
@@ -372,9 +386,11 @@ const BASE_TOTALS = {Pureza:1854,Braghetta:1843,Marcelo:1759,Ivan:1283};
 
 // Dynamic data populated from Supabase after each loadHistory()
 let dynData = {}; // { [mes]: { weeks: { [sem]: {Player:pts} }, totals: {Player:pts} } }
+let dynDays = {}; // { 'Mes_sem': [{date, diaSemana, totals:{Player:pts}}] }
 
 function computeDynData(docs) {
   dynData = {};
+  dynDays = {};
   docs.filter(d=>d.exists).forEach(d => {
     const day = d.data();
     const mes = day.mes, sem = String(day.semana);
@@ -386,7 +402,14 @@ function computeDynData(docs) {
       wd[sem][p.name] += pts;
       dynData[mes].totals[p.name] = (dynData[mes].totals[p.name]||0) + pts;
     });
+    // Store daily breakdown for week-day view
+    const key = mes + '_' + sem;
+    if (!dynDays[key]) dynDays[key] = [];
+    const dayTotals = {};
+    PL.forEach(p => { dayTotals[p.name] = day[p.name]?.total || 0; });
+    dynDays[key].push({ date: day.data, diaSemana: day.diaSemana, totals: dayTotals });
   });
+  Object.keys(dynDays).forEach(k => dynDays[k].sort((a,b) => a.date < b.date ? -1 : 1));
 }
 
 function getLiveTotals() {
@@ -631,6 +654,9 @@ function renderMonths() {
         const ws = sortP(w.t);
         const wm = Math.max(...Object.values(w.t).filter(v=>v>0))||1;
         const ww = ws[0];
+        const weekKey = m + '_' + w.l.slice(1);
+        const wdays = dynDays[weekKey];
+        const hasDays = wdays && wdays.length > 0;
         return `<div class="wcard">
           <div class="whdr">
             <div><div class="wtit">${m} ${w.l}</div><div class="wper">${w.p}</div></div>
@@ -646,6 +672,7 @@ function renderMonths() {
               <span class="pbpt">${v}</span>
             </div>`;
           }).join('')}
+          ${hasDays ? `<button class="wdays-btn" onclick="toggleWeekDays('${weekKey}',this)">Ver dias ▾</button>${renderDayView(weekKey, wdays)}` : ''}
         </div>`;
       }).join('')}
     </div>`;
@@ -657,6 +684,40 @@ function goMonth(m){
   document.querySelectorAll('.mc').forEach(e=>e.classList.remove('active'));
   document.getElementById('mv-'+m)?.classList.add('active');
   document.querySelectorAll('.mc').forEach(e=>{if(e.textContent===m)e.classList.add('active')});
+}
+
+function renderDayView(key, days) {
+  const rows = days.map(d => {
+    const s = sortP(d.totals);
+    const maxPts = Math.max(...Object.values(d.totals));
+    const hasPts = maxPts > 0;
+    const dd = d.date.slice(8), mm = d.date.slice(5,7);
+    return `<div class="wday">
+      <div class="wday-dt">
+        <div class="wday-date">${dd}/${mm}</div>
+        <div class="wday-dow">${d.diaSemana}</div>
+      </div>
+      <div class="wday-scores">
+        ${s.map(p => {
+          const pts = d.totals[p.name];
+          const isWin = hasPts && pts === maxPts;
+          return `<div class="wday-sc${isWin?' winner':''}" style="background:${p.bg};color:${p.c}">
+            <span class="wday-scp">${pts}</span>
+            <span class="wday-scn">${p.i}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="wdays" id="wdays-${key}" style="display:none">${rows}</div>`;
+}
+
+function toggleWeekDays(key, btn) {
+  const el = document.getElementById('wdays-' + key);
+  if (!el) return;
+  const open = el.style.display !== 'none';
+  el.style.display = open ? 'none' : 'block';
+  btn.textContent = open ? 'Ver dias ▾' : 'Ocultar ▴';
 }
 
 function pvcTbl(id, rows) {
