@@ -395,7 +395,9 @@ function computeDynData(docs) {
   dynDays = {};
   docs.filter(d=>d.exists).forEach(d => {
     const day = d.data();
-    const mes = day.mes, sem = String(day.semana);
+    // Re-derive mes/semana from date so old records stored before Monday-anchor fix are corrected
+    const info = getMesInfo(day.data);
+    const mes = info.mes, sem = String(info.semana);
     if (!dynData[mes]) dynData[mes] = { weeks:{}, totals:{} };
     const wd = dynData[mes].weeks;
     if (!wd[sem]) { wd[sem]={}; PL.forEach(p=>wd[sem][p.name]=0); }
@@ -409,7 +411,7 @@ function computeDynData(docs) {
     if (!dynDays[key]) dynDays[key] = [];
     const dayTotals = {};
     PL.forEach(p => { dayTotals[p.name] = day[p.name]?.total || 0; });
-    dynDays[key].push({ date: day.data, diaSemana: day.diaSemana, totals: dayTotals });
+    dynDays[key].push({ date: day.data, diaSemana: info.diaSemana, totals: dayTotals });
   });
   Object.keys(dynDays).forEach(k => dynDays[k].sort((a,b) => a.date < b.date ? -1 : 1));
 }
@@ -465,17 +467,17 @@ function getLiveHist() {
     PL.forEach(p => { result[mes].totals[p.name]=(result[mes].totals[p.name]||0)+(md.totals[p.name]||0); });
     if (!result[mes].done) result[mes].winner = sortP(result[mes].totals)[0].name;
   });
-  // Sempre garante card da semana atual no mês em curso
+  // Sempre garante card da semana atual no mês em curso (ancorando na segunda-feira)
   try {
     const today = new Date();
-    const todayMes = MES_MAP[today.getMonth()];
-    if (result[todayMes] && !result[todayMes].done) {
-      const info = getMesInfo(today.toISOString().slice(0,10));
+    const info = getMesInfo(today.toISOString().slice(0,10));
+    const curMes = info.mes; // Monday-anchored month
+    if (result[curMes] && !result[curMes].done) {
       const semLabel = 'S' + info.semana;
-      if (!result[todayMes].weeks.some(w=>w.l===semLabel)) {
+      if (!result[curMes].weeks.some(w=>w.l===semLabel)) {
         const emptyT={}; PL.forEach(p=>emptyT[p.name]=0);
-        result[todayMes].weeks.push({ l:semLabel, p:weekPeriodLabel(todayMes, info.semana), t:emptyT, partial:true });
-        result[todayMes].weeks.sort((a,b)=>parseInt(a.l.slice(1))-parseInt(b.l.slice(1)));
+        result[curMes].weeks.push({ l:semLabel, p:weekPeriodLabel(curMes, info.semana), t:emptyT, partial:true });
+        result[curMes].weeks.sort((a,b)=>parseInt(a.l.slice(1))-parseInt(b.l.slice(1)));
       }
     }
   } catch(e) {}
